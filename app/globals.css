@@ -1,0 +1,42 @@
+:root {
+  --bg: #0c1016;
+  --panel: #141b24;
+  --line: #2a3544;
+  --text: #e8eef6;
+  --muted: #8b9bb0;
+  --accent: #3ee0b4;
+  --warn: #f0a202;
+  --danger: #ff6b6b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+body { padding: 16px 14px 48px; max-width: 980px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0; }
+.sub { color: var(--muted); font-size: 13px; margin: 4px 0 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+input, select, textarea, button { font: inherit; }
+input, select, textarea {
+  width: 100%; background: #0f151d; color: var(--text); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px;
+}
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+button {
+  background: var(--accent); color: #06261d; border: 0; border-radius: 10px;
+  padding: 10px 14px; font-weight: 700; cursor: pointer; margin-top: 12px;
+}
+button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--accent); }
+.muted { color: var(--muted); }
+.setup { font-size: 12px; line-height: 1.7; }
+.setup li.ok { color: var(--accent); }
+.setup li.no { color: var(--warn); }
+.empty { color: var(--muted); padding: 20px 0; text-align: center; }
+@media (max-width: 720px) {
+  .row { grid-template-columns: 1fr; }
+  .hide-sm { display: none; }
+}
