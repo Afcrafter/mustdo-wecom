@@ -48,11 +48,10 @@ WECOM_VERIFY_CONTENT=文件里的那一行
 4. Storage → 创建 KV（Upstash Redis），会自动带上 `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`
 5. Deploy
 
-免费版 Cron 往往只能每天一次。要按你设的 15 分钟/每小时催：
+Hobby 套餐的 Vercel Cron 只能每天一次，仓库里已写成 `0 8 * * *`（UTC 8:00）。  
+要按你设的 15 分钟 / 每小时催，用 [cron-job.org](https://cron-job.org) 每 5 分钟 GET：
 
-- 升级 Vercel Pro，让 `vercel.json` 里的 `*/5 * * * *` 生效，或
-- 用 [cron-job.org](https://cron-job.org) 每 5 分钟 GET：  
-  `https://你的项目.vercel.app/api/tick?secret=你的CRON_SECRET`
+`https://你的项目.vercel.app/api/tick?secret=你的CRON_SECRET`
 
 `CRON_SECRET` 建议填上，避免别人乱打 tick。
 
