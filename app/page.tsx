@@ -7,6 +7,8 @@ type Me = {
   userid: string;
   wecomReady: boolean;
   llm: boolean;
+  needOAuth?: boolean;
+  oauth?: string;
   setup: { filled: Record<string, boolean>; kvReady: boolean };
 };
 
@@ -71,6 +73,10 @@ export default function Page() {
       setMe(a);
       setItems(b.items || []);
       setLoaded(true);
+      // 在企微客户端内打开且尚未授权 → 自动走 OAuth 绑定身份（避免普通浏览器误跳）
+      if (a?.needOAuth && a.oauth && /wxwork/i.test(navigator.userAgent)) {
+        window.location.replace(a.oauth);
+      }
     })();
   }, []);
 
@@ -151,6 +157,37 @@ export default function Page() {
           </div>
         )}
       </header>
+
+      {/* ── 未授权提示条 ── */}
+      {me?.needOAuth && (
+        <div
+          style={{
+            maxWidth: 640,
+            margin: "10px auto 0",
+            padding: "10px 14px",
+            borderRadius: 12,
+            border: "1px solid rgba(255,179,71,.45)",
+            background: "rgba(255,179,71,.08)",
+            color: "#ffd9a0",
+            fontSize: 13,
+            lineHeight: 1.6,
+            textAlign: "center",
+          }}
+        >
+          还没绑定企微身份，提醒无法推给你。
+          {me.oauth ? (
+            <a
+              href={me.oauth}
+              style={{ color: "#ffb347", fontWeight: 600, marginLeft: 6, textDecoration: "underline" }}
+            >
+              去授权 →
+            </a>
+          ) : null}
+          <div style={{ opacity: 0.7, fontSize: 12, marginTop: 4 }}>
+            提示：请在「企业微信」客户端内打开本页并点授权（普通浏览器无法完成企微 OAuth）
+          </div>
+        </div>
+      )}
 
       {/* ── 透明对话框 ── */}
       <section className="composer">
