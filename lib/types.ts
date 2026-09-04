@@ -11,6 +11,8 @@ export type Reminder = {
   nextFireAt: string;
   enabled: boolean;
   lastFiredAt: string | null;
+  /** 板块分类（AI 识别，可选）：工作/学习/生活/健康/财务/其他 */
+  tag?: string;
 };
 
 export const INTERVALS: { label: string; minutes: number }[] = [

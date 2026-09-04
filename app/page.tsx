@@ -1,67 +1,122 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { INTERVALS, type Reminder } from "@/lib/types";
+import { useEffect, useRef, useState } from "react";
+import type { Reminder } from "@/lib/types";
 
 type Me = {
   userid: string;
   wecomReady: boolean;
-  needOAuth: boolean;
-  oauth: string;
-  setup: { filled: Record<string, boolean>; kvReady: boolean; verifyFileReady: boolean };
+  llm: boolean;
+  setup: { filled: Record<string, boolean>; kvReady: boolean };
 };
 
-function toLocalInput(iso: string): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
+type Msg = { kind: "ok" | "err"; text: string } | null;
 
-function fmt(iso: string): string {
+const TAG_COLORS: Record<string, string> = {
+  工作: "#6ea8fe",
+  学习: "#b197fc",
+  财务: "#ffa94d",
+  健康: "#63e6be",
+  生活: "#faa2c1",
+  其他: "#8fa3b8",
+};
+
+const EXAMPLES = [
+  "明天上午 9 点交创新学分证明（学院办公室 301）",
+  "下午 3 点开会，每 30 分钟催我一次",
+  "每周一早上发周报",
+  "每 2 小时提醒我站起来喝水",
+];
+
+function fmtTime(iso: string): string {
   if (!iso) return "-";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const p = (n: number) => String(n).padStart(2, "0");
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  const today = new Date();
+  const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((start(d) - start(today)) / 86400000);
+  if (diff === 0) return `今天 ${hm}`;
+  if (diff === 1) return `明天 ${hm}`;
+  if (diff === 2) return `后天 ${hm}`;
+  return `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}
+
+function ivLabel(min: number): string {
+  if (!min) return "一次";
+  if (min % 10080 === 0) return min === 10080 ? "每周" : `每 ${min / 10080} 周`;
+  if (min % 1440 === 0) return min === 1440 ? "每天" : `每 ${min / 1440} 天`;
+  if (min % 60 === 0) return min === 60 ? "每小时" : `每 ${min / 60} 小时`;
+  return `每 ${min} 分钟`;
+}
+
+function sortByTime(list: Reminder[]): Reminder[] {
+  return [...list].sort((a, b) => a.nextFireAt.localeCompare(b.nextFireAt));
 }
 
 export default function Page() {
   const [me, setMe] = useState<Me | null>(null);
   const [items, setItems] = useState<Reminder[]>([]);
-  const [title, setTitle] = useState("");
-  const [note, setNote] = useState("");
-  const [remindAt, setRemindAt] = useState(toLocalInput(new Date(Date.now() + 3600_000).toISOString()));
-  const [interval, setInterval] = useState(0);
-  const [customMin, setCustomMin] = useState(120);
+  const [loaded, setLoaded] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<Msg>(null);
+  const [fresh, setFresh] = useState<Set<string>>(new Set());
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    (async () => {
+      const [a, b] = await Promise.all([fetch("/api/me").then((r) => r.json()), fetch("/api/items").then((r) => r.json())]);
+      setMe(a);
+      setItems(b.items || []);
+      setLoaded(true);
+    })();
+  }, []);
+
+  function grow() {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 160) + "px";
+  }
 
   async function reload() {
-    const [a, b] = await Promise.all([fetch("/api/me").then((r) => r.json()), fetch("/api/items").then((r) => r.json())]);
-    setMe(a);
+    const b = await fetch("/api/items").then((r) => r.json());
     setItems(b.items || []);
   }
 
-  useEffect(() => {
-    reload();
-  }, []);
-
-  const intervalMinutes = interval === -1 ? Math.max(1, customMin) : interval;
-
-  async function add(e: React.FormEvent) {
-    e.preventDefault();
-    await fetch("/api/items", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title,
-        note,
-        remindAt: new Date(remindAt).toISOString(),
-        intervalMinutes,
-      }),
-    });
-    setTitle("");
-    setNote("");
-    await reload();
+  async function doSend(raw?: string) {
+    const t = (raw ?? text).trim();
+    if (!t || busy) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await fetch("/api/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: t }),
+      });
+      const j = await r.json();
+      if (!r.ok || j.error) {
+        setMsg({ kind: "err", text: j.error || "识别失败，稍后再试" });
+        return;
+      }
+      setText("");
+      if (taRef.current) taRef.current.style.height = "auto";
+      const added: Reminder[] = j.items || [];
+      setItems((prev) => sortByTime([...added, ...prev]));
+      setFresh(new Set(added.map((x: Reminder) => x.id)));
+      window.setTimeout(() => setFresh(new Set()), 6000);
+      setMsg({
+        kind: "ok",
+        text: `${j.engine === "siliconflow" ? "硅基流动 · DeepSeek V4 Flash" : "本地规则"}拆出 ${j.count} 条，已进名单`,
+      });
+    } catch {
+      setMsg({ kind: "err", text: "网络错误，没发出去" });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function toggle(it: Reminder) {
@@ -73,110 +128,141 @@ export default function Page() {
     await reload();
   }
 
-  async function drop(id: string) {
-    await fetch(`/api/items/${id}`, { method: "DELETE" });
+  async function drop(it: Reminder) {
+    if (!window.confirm(`删掉「${it.title}」？`)) return;
+    await fetch(`/api/items/${it.id}`, { method: "DELETE" });
     await reload();
   }
 
-  const missing = useMemo(() => {
-    if (!me) return [];
-    return Object.entries(me.setup.filled)
-      .filter(([, v]) => !v)
-      .map(([k]) => k);
-  }, [me]);
+  const next = items.find((x) => x.enabled);
+  const missingKeys = me ? Object.entries(me.setup.filled).filter(([, v]) => !v).map(([k]) => k) : [];
 
   return (
-    <main>
-      <h1>必办时间表</h1>
-      <p className="sub">写进名单，到点由企业微信应用消息催你。间隔自己定。</p>
+    <main className="shell">
+      {/* ── 顶栏 ── */}
+      <header className="topbar">
+        <div className="brand">
+          必办 <span className="dot">·</span>
+          <small>企业微信到点提醒</small>
+        </div>
+        {next && (
+          <div className="stat">
+            {items.length} 条提醒 · 最近一条 {fmtTime(next.nextFireAt)}
+          </div>
+        )}
+      </header>
 
-      {me && !me.setup.kvReady && (
-        <div className="card muted">本地可用文件存储。部署到 Vercel 后请加上 Upstash Redis 两个变量，否则提醒名单无法跨实例保存。</div>
+      {/* ── 透明对话框 ── */}
+      <section className="composer">
+        <textarea
+          ref={taRef}
+          rows={1}
+          value={text}
+          disabled={busy}
+          onChange={(e) => {
+            setText(e.target.value);
+            grow();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              doSend();
+            }
+          }}
+          placeholder="一句话说出要办的事，回车自动拆成提醒板块。例如：明天上午 9 点交创新学分证明，每 30 分钟催一次……"
+        />
+        <div className="composerBar">
+          <div className="left">
+            {busy ? (
+              <span className="thinking">拆板块中…</span>
+            ) : msg ? (
+              <span className={msg.kind === "ok" ? "msgOk" : "msgErr"}>{msg.text}</span>
+            ) : (
+              <span className="hint">Enter 发送 · Shift+Enter 换行</span>
+            )}
+          </div>
+          <button className="send" disabled={busy || !text.trim()} onClick={() => doSend()} title="识别并写入">
+            ➤
+          </button>
+        </div>
+      </section>
+
+      {/* ── 提醒板块列表 ── */}
+      {items.length > 0 && (
+        <div className="listHead">
+          <h2>提醒板块</h2>
+          <span>{items.length} 条</span>
+        </div>
       )}
 
-      <form className="card" onSubmit={add}>
-        <label>要提醒的事</label>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：交创新学分证明 / 续费 Spotify" required />
-        <label>备注（可选）</label>
-        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="链接、找谁、交到哪里" />
-        <div className="row">
-          <div>
-            <label>第一次提醒时间</label>
-            <input type="datetime-local" value={remindAt} onChange={(e) => setRemindAt(e.target.value)} required />
+      <section className="blocks">
+        {items.map((it) => {
+          const color = TAG_COLORS[it.tag || ""] || TAG_COLORS["其他"];
+          return (
+            <article key={it.id} className={["block", fresh.has(it.id) ? "fresh" : "", !it.enabled ? "paused" : ""].join(" ")}>
+              <span className="rail" style={{ background: color }} />
+              <div className="blockMain">
+                <div className="blockTop">
+                  <span className="tag" style={{ color }}>
+                    {it.tag || "提醒"}
+                  </span>
+                  <span className="time">⏰ {fmtTime(it.nextFireAt)}</span>
+                  <span className="iv">{ivLabel(it.intervalMinutes)}</span>
+                  {!it.enabled && <span className="off">已暂停</span>}
+                </div>
+                <b className="title">{it.title}</b>
+                {it.note && <p className="note">{it.note}</p>}
+              </div>
+              <div className="acts">
+                <button className="iconBtn" title={it.enabled ? "暂停" : "恢复"} onClick={() => toggle(it)}>
+                  {it.enabled ? "⏸" : "▶"}
+                </button>
+                <button className="iconBtn danger" title="删除" onClick={() => drop(it)}>
+                  ✕
+                </button>
+              </div>
+            </article>
+          );
+        })}
+      </section>
+
+      {/* ── 空状态 ── */}
+      {loaded && items.length === 0 && (
+        <section className="empty">
+          <p className="big">今天想提醒自己什么？</p>
+          <p className="sub">点一下示例直接试，也可以自己写一句</p>
+          <div className="examples">
+            {EXAMPLES.map((ex) => (
+              <button key={ex} className="chip" onClick={() => doSend(ex)}>
+                {ex}
+              </button>
+            ))}
           </div>
-          <div>
-            <label>之后隔多久再催</label>
-            <select value={interval} onChange={(e) => setInterval(Number(e.target.value))}>
-              {INTERVALS.map((x) => (
-                <option key={x.minutes} value={x.minutes}>
-                  {x.label}
-                </option>
+        </section>
+      )}
+
+      {/* ── 页脚 ── */}
+      <footer>
+        {me && (
+          <span className="engine">
+            {me.llm ? "识别引擎 · 硅基流动 DeepSeek V4 Flash" : "识别引擎 · 本地规则（.env.local 填 SILICONFLOW_API_KEY 即启用 AI）"}
+          </span>
+        )}
+        {!me?.wecomReady && <span className="muted"> · 未接企业微信，先本地体验</span>}
+        {me && me.setup.filled && (
+          <details className="setup">
+            <summary>环境变量检查（部署用）</summary>
+            <ul>
+              {Object.entries(me.setup.filled).map(([k, v]) => (
+                <li key={k} className={v ? "ok" : "no"}>
+                  {v ? "已填" : "空着"} · {k}
+                </li>
               ))}
-              <option value={-1}>自定义分钟</option>
-            </select>
-          </div>
-        </div>
-        {interval === -1 && (
-          <>
-            <label>自定义间隔（分钟）</label>
-            <input type="number" min={1} value={customMin} onChange={(e) => setCustomMin(Number(e.target.value))} />
-          </>
+            </ul>
+            {missingKeys.length > 0 && <p className="muted">本地演示无需理会；要接企业微信提醒才需要补齐。</p>}
+          </details>
         )}
-        <button type="submit">写入名单</button>
-      </form>
-
-      <div className="card">
-        <table>
-          <thead>
-            <tr>
-              <th>事项</th>
-              <th>下次提醒</th>
-              <th className="hide-sm">间隔</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((it) => (
-              <tr key={it.id}>
-                <td>
-                  <b>{it.title}</b>
-                  <div className="muted">{it.note}</div>
-                  {!it.enabled && <span className="badge">已停</span>}
-                </td>
-                <td>{fmt(it.nextFireAt)}</td>
-                <td className="hide-sm">{it.intervalMinutes ? `每 ${it.intervalMinutes} 分钟` : "一次"}</td>
-                <td>
-                  <button className="ghost" type="button" onClick={() => toggle(it)}>
-                    {it.enabled ? "暂停" : "恢复"}
-                  </button>
-                  <button className="danger" type="button" onClick={() => drop(it.id)}>
-                    删除
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!items.length && <div className="empty">名单是空的。先加一条，再在企业微信后台把应用主页指到这个网站。</div>}
-      </div>
-
-      <div className="card setup">
-        <b>环境变量（Vercel 填写，仓库里留空）</b>
-        <ul>
-          {me &&
-            Object.entries(me.setup.filled).map(([k, v]) => (
-              <li key={k} className={v ? "ok" : "no"}>
-                {v ? "已填" : "空着"} · {k}
-              </li>
-            ))}
-        </ul>
-        {me?.needOAuth && me.oauth && (
-          <p>
-            <a href={me.oauth}>在企业微信里授权身份</a>
-          </p>
-        )}
-        {missing.length > 0 && <p className="muted">先部署，再回 Vercel 把空着的项补上，然后重新点企业微信后台的「保存」做 URL 验证。</p>}
-      </div>
+      </footer>
     </main>
   );
 }
