@@ -61,6 +61,7 @@ export default function Page() {
   const [me, setMe] = useState<Me | null>(null);
   const [items, setItems] = useState<Reminder[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [authErr, setAuthErr] = useState<string>("");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<Msg>(null);
@@ -68,6 +69,12 @@ export default function Page() {
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("oauth") === "fail" && sp.get("why")) {
+      setAuthErr(`授权失败：${sp.get("why")}`);
+    } else if (sp.get("oauth") === "nocode") {
+      setAuthErr("授权未完成（企微未返回 code）——请在企微客户端内重试");
+    }
     (async () => {
       const [a, b] = await Promise.all([fetch("/api/me").then((r) => r.json()), fetch("/api/items").then((r) => r.json())]);
       setMe(a);
@@ -158,6 +165,26 @@ export default function Page() {
           </div>
         )}
       </header>
+
+      {/* ── 授权错误条 ── */}
+      {authErr && (
+        <div
+          style={{
+            maxWidth: 640,
+            margin: "10px auto 0",
+            padding: "10px 14px",
+            borderRadius: 12,
+            border: "1px solid rgba(255,99,99,.5)",
+            background: "rgba(255,99,99,.1)",
+            color: "#ffb4b4",
+            fontSize: 13,
+            lineHeight: 1.6,
+            wordBreak: "break-all",
+          }}
+        >
+          {authErr}
+        </div>
+      )}
 
       {/* ── 未授权提示条 ── */}
       {me?.needOAuth && (

@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code") || "";
   const base = env("APP_BASE_URL") || req.nextUrl.origin;
   if (!code) {
-    return NextResponse.redirect(base + "/");
+    return NextResponse.redirect(base + "/?oauth=nocode");
   }
   try {
     const userid = await useridFromCode(code);
@@ -21,7 +21,8 @@ export async function GET(req: NextRequest) {
       maxAge: 60 * 60 * 24 * 30,
     });
     return res;
-  } catch {
-    return NextResponse.redirect(base + "/?oauth=fail");
+  } catch (err) {
+    const why = err instanceof Error ? err.message : "unknown";
+    return NextResponse.redirect(base + `/?oauth=fail&why=${encodeURIComponent(why)}`);
   }
 }
