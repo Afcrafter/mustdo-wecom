@@ -73,8 +73,9 @@ export default function Page() {
       setMe(a);
       setItems(b.items || []);
       setLoaded(true);
-      // 在企微客户端内打开且尚未授权 → 自动走 OAuth 绑定身份（避免普通浏览器误跳）
-      if (a?.needOAuth && a.oauth && /wxwork/i.test(navigator.userAgent)) {
+      // 在企微客户端内打开且尚未授权 → 自动走 OAuth（sessionStorage 限一次，避免授权未完成时死循环）
+      if (a?.needOAuth && a.oauth && /wxwork/i.test(navigator.userAgent) && !sessionStorage.getItem("oauth_tried")) {
+        sessionStorage.setItem("oauth_tried", "1");
         window.location.replace(a.oauth);
       }
     })();
