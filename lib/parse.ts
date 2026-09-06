@@ -7,6 +7,15 @@
  */
 import { env } from "./env";
 
+// ────────────────────────────────────────────────
+// 业务面向中国大陆用户：所有「几点几分」一律按北京时间（UTC+8）解释。
+// 服务器（VPS / Vercel）默认跑在 UTC，若不固定时区，用户说「八点」会被
+// 当成 UTC 08:00 存储，前端按北京时区显示时就变成 16:00（+8 小时偏移）。
+// 模块顶部把进程时区钉死为 Asia/Shanghai，保证 new Date() 的本地取数
+// （getHours/getFullYear/…）全部返回北京时间。
+// ────────────────────────────────────────────────
+process.env.TZ = "Asia/Shanghai";
+
 export type ParsedTask = {
   title: string;
   note: string;
@@ -39,16 +48,16 @@ export async function parseTasks(text: string, now = new Date()): Promise<{ task
 /* ────────────────────────── 硅基流动 DeepSeek ────────────────────────── */
 
 function buildPrompt(now: Date): string {
-  const tz = tzOffset(now);
+  // 模块顶部已固定 TZ=Asia/Shanghai，now 的本地取数即北京时间
   const humanNow = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
   const weekday = ["日", "一", "二", "三", "四", "五", "六"][now.getDay()];
   return [
     "你是日程解析器。把用户一句/一段自然语言里所有待办事项，逐条拆成结构化 JSON。",
     "规则：",
     "1. 输出必须是合法 JSON 对象 {\"items\":[{...}]}，不要 markdown 代码块，不要多余文字。",
-    `2. 当前时间：${humanNow}（周${weekday}，时区 ${tz}）。所有 firstAt 都要按这个时间算成绝对 ISO 8601 字符串（含时区，如 ${tz}）。`,
-    "3. 每条字段：title=简短事项名（去掉时间词）；note=补充信息（链接/地点/金额/找谁等，没有就空字符串）；firstAt=首次提醒绝对时间；intervalMinutes=重复间隔分钟数（只提醒一次=0，每15分钟=15，每小时=60，每天=1440，每周=10080，每30分钟=30……没写重复就 0）；tag 从 工作/学习/生活/健康/财务/其他 六类里选一个最贴切的。",
-    "4. 时间理解：没写日期默认今天；写了上午/下午/晚上按 12 小时制处理；只写日期没写时间默认当天 09:00。",
+    `2. 用户所在地时区固定为北京时间 Asia/Shanghai（UTC+8）。当前北京时间：${humanNow}（周${weekday}）。所有 firstAt 一律按北京时间计算。`,
+    `3. 每条字段：title=简短事项名（去掉时间词）；note=补充信息（链接/地点/金额/找谁等，没有就空字符串）；firstAt=首次提醒时间，必须是带 +08:00 时区的 ISO 8601 字符串（例如北京时间晚上八点 = \"2026-09-11T20:00:00+08:00\"）；intervalMinutes=重复间隔分钟数（只提醒一次=0，每15分钟=15，每小时=60，每天=1440，每周=10080……没写重复就 0）；tag 从 工作/学习/生活/健康/财务/其他 六类里选一个最贴切的。`,
+    "4. 时间理解：没写日期默认今天；写了上午/下午/晚上按 12 小时制处理（晚上8点=20:00，下午3点=15:00）；只写日期没写时间默认当天 09:00。",
     "5. 如果算出的时间已经过去：没写明确日期的自动顺延到下一个未来时刻（同钟点往后天推）；写了星期几的推到下周同一天。",
     "6. 多个事项拆多条（用 ；。！换行「然后/另外/还有」等分隔），不要合并。",
   ].join("\n");
@@ -318,7 +327,13 @@ function guessTag(s: string): string {
 /* ────────────────────────── 工具 ────────────────────────── */
 
 function toValidFutureIso(iso: string, now: Date): string {
-  const d = new Date(iso);
+  const raw = String(iso).trim();
+  if (!raw) return defaultTime(now);
+  // 模型偶发返回不带时区的本地时间（如 "2026-09-11T20:00:00"）：
+  // 一律按北京时间(+08:00)解释，而不是服务器本地时区（VPS/Vercel 是 UTC）。
+  const hasOffset = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
+  const normalized = hasOffset ? raw : `${raw}+08:00`;
+  const d = new Date(normalized);
   if (Number.isNaN(d.getTime())) return defaultTime(now);
   if (d.getTime() <= now.getTime() - 60_000) {
     // 时间已过/接近：顺延到最近未来（LLM 已经处理过，这里是最后一道保险）
@@ -333,13 +348,6 @@ function defaultTime(now: Date): string {
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
-}
-
-function tzOffset(d: Date): string {
-  const off = -d.getTimezoneOffset();
-  const sign = off >= 0 ? "+" : "-";
-  const abs = Math.abs(off);
-  return `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
 }
 
 function startOfDay(d: Date): Date {
