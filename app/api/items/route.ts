@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
     nextFireAt: remindAt,
     enabled: true,
     lastFiredAt: null,
+    createdAt: new Date().toISOString(),
   };
   await upsert(item);
   return NextResponse.json({ item });

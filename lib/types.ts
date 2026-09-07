@@ -13,6 +13,8 @@ export type Reminder = {
   lastFiredAt: string | null;
   /** 板块分类（AI 识别，可选）：工作/学习/生活/健康/财务/其他 */
   tag?: string;
+  /** 写入时间 ISO（老数据可能没有，用于“按添加顺序”排序） */
+  createdAt?: string;
 };
 
 export const INTERVALS: { label: string; minutes: number }[] = [

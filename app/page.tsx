@@ -23,6 +23,17 @@ const TAG_COLORS: Record<string, string> = {
   其他: "#8fa3b8",
 };
 
+/** 分类页顺序：按调色板固定顺序展示，只出现有条目的分类 */
+const TAG_ORDER = ["工作", "学习", "财务", "健康", "生活", "其他"];
+
+type SortMode = "time" | "newest" | "oldest";
+
+const SORT_OPTIONS: { key: SortMode; label: string; title: string }[] = [
+  { key: "time", label: "⏰ 提醒时间", title: "离下次提醒近的排前面" },
+  { key: "newest", label: "🆕 最近添加", title: "刚写入的排最前面" },
+  { key: "oldest", label: "🕘 最早添加", title: "按写入先后，先写的排前面" },
+];
+
 const EXAMPLES = [
   "明天上午 9 点交创新学分证明（学院办公室 301）",
   "下午 3 点开会，每 30 分钟催我一次",
@@ -53,8 +64,16 @@ function ivLabel(min: number): string {
   return `每 ${min} 分钟`;
 }
 
-function sortByTime(list: Reminder[]): Reminder[] {
-  return [...list].sort((a, b) => a.nextFireAt.localeCompare(b.nextFireAt));
+/** 排序：time=下次提醒先后；newest/oldest=写入时间（老数据没有时间戳时：最新降序排最后 / 最早升序排最前） */
+function sortItems(list: Reminder[], mode: SortMode): Reminder[] {
+  const arr = [...list];
+  if (mode === "newest") {
+    return arr.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  }
+  if (mode === "oldest") {
+    return arr.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+  }
+  return arr.sort((a, b) => a.nextFireAt.localeCompare(b.nextFireAt));
 }
 
 export default function Page() {
@@ -66,6 +85,8 @@ export default function Page() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<Msg>(null);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<string>("全部"); // 全部 | 分类名（工作/学习/…）
+  const [sortMode, setSortMode] = useState<SortMode>("time");
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -80,6 +101,11 @@ export default function Page() {
       setMe(a);
       setItems(b.items || []);
       setLoaded(true);
+      // 支持 ?cat=分类&sort=time|newest|oldest 作为初始状态（便于直达/分享）
+      const cat = sp.get("cat");
+      if (cat === "全部" || TAG_ORDER.includes(cat || "")) setFilter(cat as string);
+      const srt = sp.get("sort");
+      if (srt === "time" || srt === "newest" || srt === "oldest") setSortMode(srt);
       // 在企微客户端内打开且尚未授权 → 自动走 OAuth（sessionStorage 限一次，避免授权未完成时死循环）
       if (a?.needOAuth && a.oauth && /wxwork/i.test(navigator.userAgent) && !sessionStorage.getItem("oauth_tried")) {
         sessionStorage.setItem("oauth_tried", "1");
@@ -94,6 +120,22 @@ export default function Page() {
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 160) + "px";
   }
+
+  // 当前分类被删光 / 列表只剩 1 条时，自动回到“全部”，避免卡在空筛选上
+  useEffect(() => {
+    if (filter !== "全部" && !items.some((it) => (it.tag || "其他") === filter)) setFilter("全部");
+    if (items.length <= 1 && filter !== "全部") setFilter("全部");
+  }, [items, filter]);
+
+  // 把筛选/排序写回 URL（replaceState 不刷新页面），刷新或分享不丢状态
+  useEffect(() => {
+    const u = new URL(window.location.href);
+    if (filter !== "全部") u.searchParams.set("cat", filter);
+    else u.searchParams.delete("cat");
+    if (sortMode !== "time") u.searchParams.set("sort", sortMode);
+    else u.searchParams.delete("sort");
+    window.history.replaceState(null, "", u.toString());
+  }, [filter, sortMode]);
 
   async function reload() {
     const b = await fetch("/api/items").then((r) => r.json());
@@ -119,7 +161,13 @@ export default function Page() {
       setText("");
       if (taRef.current) taRef.current.style.height = "auto";
       const added: Reminder[] = j.items || [];
-      setItems((prev) => sortByTime([...added, ...prev]));
+      setItems((prev) => sortItems([...added, ...prev], sortMode));
+      // 新条目不在当前分类下时，自动切回“全部”让它能被看到
+      setFilter((cur) => {
+        if (cur === "全部") return cur;
+        const anyMatch = added.some((x: Reminder) => (x.tag || "其他") === cur);
+        return anyMatch ? cur : "全部";
+      });
       setFresh(new Set(added.map((x: Reminder) => x.id)));
       window.setTimeout(() => setFresh(new Set()), 6000);
       setMsg({
@@ -149,6 +197,20 @@ export default function Page() {
   }
 
   const next = items.find((x) => x.enabled);
+  // 分类页签：全部 + 有条目的分类（含数量，随数据自动增减）
+  const tagCount = new Map<string, number>();
+  for (const it of items) {
+    const k = it.tag || "其他";
+    tagCount.set(k, (tagCount.get(k) || 0) + 1);
+  }
+  const tabs = [
+    { key: "全部", count: items.length },
+    ...TAG_ORDER.filter((t) => (tagCount.get(t) || 0) > 0).map((t) => ({ key: t, count: tagCount.get(t) || 0 })),
+  ];
+  const shown = sortItems(
+    items.filter((it) => filter === "全部" || (it.tag || "其他") === filter),
+    sortMode
+  );
   const missingKeys = me ? Object.entries(me.setup.filled).filter(([, v]) => !v).map(([k]) => k) : [];
 
   return (
@@ -256,12 +318,44 @@ export default function Page() {
       {items.length > 0 && (
         <div className="listHead">
           <h2>提醒板块</h2>
-          <span>{items.length} 条</span>
+          <span>
+            {shown.length}/{items.length} 条
+          </span>
+        </div>
+      )}
+
+      {/* ── 分类页签 + 排序 ── */}
+      {items.length > 1 && (
+        <div className="toolbar">
+          <div className="tabs">
+            {tabs.map((t) => (
+              <button
+                key={t.key}
+                className={["pill", filter === t.key ? "active" : ""].join(" ")}
+                onClick={() => setFilter(t.key)}
+              >
+                {t.key}
+                <i className="cnt">{t.count}</i>
+              </button>
+            ))}
+          </div>
+          <div className="sorts">
+            {SORT_OPTIONS.map((s) => (
+              <button
+                key={s.key}
+                title={s.title}
+                className={["pill", "sort", sortMode === s.key ? "active" : ""].join(" ")}
+                onClick={() => setSortMode(s.key)}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
       <section className="blocks">
-        {items.map((it) => {
+        {shown.map((it) => {
           const color = TAG_COLORS[it.tag || ""] || TAG_COLORS["其他"];
           return (
             <article key={it.id} className={["block", fresh.has(it.id) ? "fresh" : "", !it.enabled ? "paused" : ""].join(" ")}>

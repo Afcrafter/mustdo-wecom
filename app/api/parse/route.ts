@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
       enabled: true,
       lastFiredAt: null,
       tag: t.tag && t.tag !== "其他" ? t.tag : undefined,
+      createdAt: new Date().toISOString(),
     };
     await upsert(item);
     saved.push(item);
