@@ -35,6 +35,16 @@ body { padding: 0 16px 64px; }
 .brand small { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 2px; }
 .brand .dot { color: var(--accent); }
 .stat { font-size: 12px; color: var(--muted); }
+.meTag {
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: default;
+  white-space: nowrap;
+}
 
 /* ── 透明对话框 ── */
 .composer {

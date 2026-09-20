@@ -226,6 +226,11 @@ export default function Page() {
             {items.length} 条提醒 · 最近一条 {fmtTime(next.nextFireAt)}
           </div>
         )}
+        {me && (
+          <div className="meTag" title={`当前会话账号：${me.userid}`}>
+            👤 {me.userid.length > 8 ? me.userid.slice(0, 5) + "…" : me.userid}
+          </div>
+        )}
       </header>
 
       {/* ── 授权错误条 ── */}
